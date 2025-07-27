@@ -1,0 +1,135 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'package-lock.json'
+        
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'zulu'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Cache node modules
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+          
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Create Firebase config file
+      run: |
+        echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+        
+    - name: Create keystore
+      run: |
+        echo '${{ secrets.ANDROID_KEYSTORE }}' | base64 -d > android/app/upload-keystore.keystore
+        
+    - name: Create gradle.properties
+      run: |
+        echo "MYAPP_UPLOAD_STORE_FILE=upload-keystore.keystore" >> android/gradle.properties
+        echo "MYAPP_UPLOAD_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> android/gradle.properties
+        echo "MYAPP_UPLOAD_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> android/gradle.properties
+        echo "MYAPP_UPLOAD_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> android/gradle.properties
+        
+    - name: Grant execute permission for gradlew
+      run: chmod +x android/gradlew
+      
+    - name: Build Debug APK
+      run: |
+        cd android
+        ./gradlew assembleDebug
+        
+    - name: Build Release APK
+      run: |
+        cd android
+        ./gradlew assembleRelease
+        
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        
+    - name: Upload Release APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release
+        path: android/app/build/outputs/apk/release/app-release.apk
+        
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Vietnamese AI Chat v${{ github.run_number }}
+        draft: false
+        prerelease: false
+        body: |
+          ## Vietnamese AI Chat Android App
+          
+          ### Tính năng chính:
+          - 🤖 AI Chat với Gemini API
+          - 🔐 Firebase Authentication
+          - 🎨 Tạo hình ảnh AI
+          - 🎬 Tạo video AI  
+          - 💻 Web Builder tích hợp
+          - 🌓 Chế độ sáng/tối
+          - 💳 Hệ thống Credits
+          
+          ### Cài đặt:
+          1. Tải file APK phù hợp với thiết bị
+          2. Bật "Cài đặt từ nguồn không xác định"
+          3. Cài đặt APK
+          4. Đăng ký tài khoản hoặc đăng nhập
+          
+          **Build:** ${{ github.sha }}
+          **Date:** ${{ github.event.head_commit.timestamp }}
+          
+    - name: Upload Release Asset
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: android/app/build/outputs/apk/release/app-release.apk
+        asset_name: vietnamese-ai-chat-v${{ github.run_number }}.apk
+        asset_content_type: application/vnd.android.package-archive
